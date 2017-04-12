@@ -145,6 +145,7 @@ class AnimationManager {
         public void onAnimationEnd(Animator animation) {
             pdfView.loadPages();
             hideHandle();
+            pdfView.triggerZoomEnd();
         }
 
         @Override
@@ -153,6 +154,7 @@ class AnimationManager {
 
         @Override
         public void onAnimationStart(Animator animation) {
+            pdfView.triggerZoomStart();
         }
 
     }

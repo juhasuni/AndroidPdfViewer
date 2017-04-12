@@ -33,11 +33,13 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.widget.RelativeLayout;
 
+import com.github.barteksc.pdfviewer.listener.OnAnnotationLinkTapListener;
 import com.github.barteksc.pdfviewer.listener.OnDrawListener;
 import com.github.barteksc.pdfviewer.listener.OnErrorListener;
 import com.github.barteksc.pdfviewer.listener.OnLoadCompleteListener;
 import com.github.barteksc.pdfviewer.listener.OnPageChangeListener;
 import com.github.barteksc.pdfviewer.listener.OnPageScrollListener;
+import com.github.barteksc.pdfviewer.listener.OnZoomListener;
 import com.github.barteksc.pdfviewer.listener.OnRenderListener;
 import com.github.barteksc.pdfviewer.model.PagePart;
 import com.github.barteksc.pdfviewer.scroll.ScrollHandle;
@@ -177,6 +179,11 @@ public class PDFView extends RelativeLayout {
     private float zoom = 1f;
 
     /**
+     * True if the PDF is zooming (zoom has been started but not ended)
+     */
+    private boolean isZooming = false;
+
+    /**
      * True if the PDFView has been recycled
      */
     private boolean recycled = true;
@@ -220,6 +227,11 @@ public class PDFView extends RelativeLayout {
     private OnPageScrollListener onPageScrollListener;
 
     /**
+     * Callback object to call before and after the page is zoomed
+     */
+    private OnZoomListener onZoomListener;
+
+    /**
      * Call back object to call when the above layer is to drawn
      */
     private OnDrawListener onDrawListener;
@@ -228,6 +240,11 @@ public class PDFView extends RelativeLayout {
      * Call back object to call when the document is initially rendered
      */
     private OnRenderListener onRenderListener;
+
+    /**
+     * Callback object to call when user taps an annotation link
+     */
+    private OnAnnotationLinkTapListener onAnnotationLinkTapListener;
 
     /**
      * Paint object for drawing
@@ -286,7 +303,7 @@ public class PDFView extends RelativeLayout {
      */
     private boolean enableAntialiasing = true;
     private PaintFlagsDrawFilter antialiasFilter =
-            new PaintFlagsDrawFilter(0, Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+            new PaintFlagsDrawFilter(0, Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
     /**
      * Construct the initial view
@@ -468,8 +485,20 @@ public class PDFView extends RelativeLayout {
         return this.onPageScrollListener;
     }
 
+    private void setOnZoomListener(OnZoomListener onZoomListener) {
+        this.onZoomListener = onZoomListener;
+    }
+
+    OnZoomListener getOnZoomListener() {
+        return this.onZoomListener;
+    }
+
     private void setOnRenderListener(OnRenderListener onRenderListener) {
         this.onRenderListener = onRenderListener;
+    }
+
+    private void setOnAnnotationLinkTapListener(OnAnnotationLinkTapListener onLinkTapListener) {
+        this.onAnnotationLinkTapListener = onLinkTapListener;
     }
 
     OnRenderListener getOnRenderListener() {
@@ -986,6 +1015,10 @@ public class PDFView extends RelativeLayout {
      * It will call moveTo() to make sure the given point stays
      * in the middle of the screen.
      *
+     * Note: calling this method does not trigger zoom start/end
+     * callbacks. Remember to call triggerZoomStart and triggerZoomEnd,
+     * respectively.
+     *
      * @param zoom  The zoom level.
      * @param pivot The point on the screen that should stays.
      */
@@ -1092,6 +1125,65 @@ public class PDFView extends RelativeLayout {
 
     public void zoomWithAnimation(float scale) {
         animationManager.startZoomAnimation(getWidth() / 2, getHeight() / 2, zoom, scale);
+    }
+
+    public void triggerZoomStart() {
+        if (isZooming) {
+            return; // do nothing if already started
+        }
+
+        isZooming = true;
+        if (onZoomListener != null) {
+            onZoomListener.onZoomStart(getZoom());
+        }
+    }
+
+    public void triggerZoomEnd() {
+        isZooming = false;
+        if (onZoomListener != null) {
+            onZoomListener.onZoomEnd(getZoom());
+        }
+    }
+
+    public void handleSingleTap(float x, float y) {
+
+        // Convert x, y and content size based on current panoration
+        // offsets and zoom level
+        float offsetX = getCurrentXOffset();
+        float offsetY = getCurrentYOffset();
+        float contentX = x - offsetX;
+        float contentY = y - offsetY;
+        int scaledX = Math.round(contentX);
+        int scaledY = Math.round(contentY);
+        int contentWidth = Math.round(toCurrentScale(optimalPageWidth));
+        int contentHeight = Math.round(toCurrentScale(optimalPageHeight));
+
+        // Convert position (X,Y) from device to page (PDF) coordinate system.
+        // In device the origin is in the top-left corner while in
+        // the PDF the origin is in the bottom-left corner.
+        PdfDocument.Position pos = pdfiumCore.deviceToPage(
+                pdfDocument,
+                getCurrentPage(),
+                0,
+                0,
+                contentWidth,
+                contentHeight,
+                0,
+                scaledX,
+                scaledY);
+
+        // If the point is within the PDF
+        if (pos != null) {
+            // Find link from given PDF position
+            PdfDocument.Link link = pdfiumCore.getLinkAtPoint(
+                    this.pdfDocument, this.getCurrentPage(), pos.getX(), pos.getY());
+
+            if (link != null && this.onAnnotationLinkTapListener != null) {
+                this.onAnnotationLinkTapListener.onSingleTapLink(link);
+            }
+        }
+
+
     }
 
     private void setScrollHandle(ScrollHandle scrollHandle) {
@@ -1219,6 +1311,7 @@ public class PDFView extends RelativeLayout {
 
     /**
      * Use bytearray as the pdf source, documents is not saved
+     *
      * @param bytes
      * @return
      */
@@ -1259,7 +1352,11 @@ public class PDFView extends RelativeLayout {
 
         private OnPageScrollListener onPageScrollListener;
 
+        private OnZoomListener onZoomListener;
+
         private OnRenderListener onRenderListener;
+
+        private OnAnnotationLinkTapListener onAnnotationLinkTapListener;
 
         private int defaultPage = 0;
 
@@ -1312,6 +1409,11 @@ public class PDFView extends RelativeLayout {
             return this;
         }
 
+        public Configurator onPageZoom(OnZoomListener onZoomListener) {
+            this.onZoomListener = onZoomListener;
+            return this;
+        }
+
         public Configurator onError(OnErrorListener onErrorListener) {
             this.onErrorListener = onErrorListener;
             return this;
@@ -1324,6 +1426,11 @@ public class PDFView extends RelativeLayout {
 
         public Configurator onRender(OnRenderListener onRenderListener) {
             this.onRenderListener = onRenderListener;
+            return this;
+        }
+
+        public Configurator onAnnotationLinkTap(OnAnnotationLinkTapListener onLinkTapListener) {
+            this.onAnnotationLinkTapListener = onLinkTapListener;
             return this;
         }
 
@@ -1357,7 +1464,9 @@ public class PDFView extends RelativeLayout {
             PDFView.this.setOnDrawListener(onDrawListener);
             PDFView.this.setOnPageChangeListener(onPageChangeListener);
             PDFView.this.setOnPageScrollListener(onPageScrollListener);
+            PDFView.this.setOnZoomListener(onZoomListener);
             PDFView.this.setOnRenderListener(onRenderListener);
+            PDFView.this.setOnAnnotationLinkTapListener(onAnnotationLinkTapListener);
             PDFView.this.enableSwipe(enableSwipe);
             PDFView.this.enableDoubletap(enableDoubletap);
             PDFView.this.setDefaultPage(defaultPage);

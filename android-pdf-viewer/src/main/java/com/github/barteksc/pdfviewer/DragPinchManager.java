@@ -89,6 +89,9 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
                 ps.hide();
             }
         }
+
+        pdfView.handleSingleTap(e.getX(), e.getY());
+
         pdfView.performClick();
         return true;
     }
@@ -176,6 +179,7 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     @Override
     public boolean onScaleBegin(ScaleGestureDetector detector) {
+        pdfView.triggerZoomStart();
         scaling = true;
         return true;
     }
@@ -185,6 +189,7 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
         pdfView.loadPages();
         hideHandle();
         scaling = false;
+        pdfView.triggerZoomEnd();
     }
 
     @Override
