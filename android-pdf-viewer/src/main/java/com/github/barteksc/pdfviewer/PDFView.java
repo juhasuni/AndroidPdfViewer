@@ -1409,7 +1409,7 @@ public class PDFView extends RelativeLayout {
             return this;
         }
 
-        public Configurator onPageZoom(OnZoomListener onZoomListener) {
+        public Configurator onZoom(OnZoomListener onZoomListener) {
             this.onZoomListener = onZoomListener;
             return this;
         }
