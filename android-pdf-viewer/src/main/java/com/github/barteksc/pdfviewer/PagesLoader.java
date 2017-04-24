@@ -2,6 +2,7 @@ package com.github.barteksc.pdfviewer;
 
 
 import android.graphics.RectF;
+import android.util.Log;
 import android.util.Pair;
 
 import com.github.barteksc.pdfviewer.util.Constants;
@@ -52,35 +53,33 @@ class PagesLoader {
     }
 
     private int documentPage(int userPage) {
-        int documentPage = userPage;
-        if (pdfView.getFilteredUserPages() != null) {
-            if (userPage < 0 || userPage >= pdfView.getFilteredUserPages().length) {
-                return -1;
-            } else {
-                documentPage = pdfView.getFilteredUserPages()[userPage];
-            }
-        }
-
-        if (documentPage < 0 || userPage >= pdfView.getDocumentPageCount()) {
-            return -1;
-        }
-
-        return documentPage;
+        return pdfView.getDocumentPage(userPage);
     }
 
     private Holder getPageAndCoordsByOffset(float offset) {
         Holder holder = new Holder();
         float fixOffset = -MathUtils.max(offset, 0);
+        float col, row, page;
 
         if (pdfView.isSwipeVertical()) {
-            holder.page = MathUtils.floor(fixOffset / scaledHeight);
-            holder.row = MathUtils.floor(Math.abs(fixOffset - scaledHeight * holder.page) / rowHeight);
-            holder.col = MathUtils.floor(xOffset / colWidth);
+            page = MathUtils.floor(fixOffset / scaledHeight);
         } else {
-            holder.page = MathUtils.floor(fixOffset / scaledWidth);
-            holder.col = MathUtils.floor(Math.abs(fixOffset - scaledWidth * holder.page) / colWidth);
-            holder.row = MathUtils.floor(yOffset / rowHeight);
+            page = MathUtils.floor(fixOffset / scaledWidth);
         }
+
+        holder.page = (MathUtils.ceil(page) - page < 0.00001) ? MathUtils.ceil(page) : MathUtils.floor(page);
+
+        if (pdfView.isSwipeVertical()) {
+            row = Math.abs(fixOffset - scaledHeight * holder.page) / rowHeight;
+            col = xOffset / colWidth;
+        } else {
+            col = Math.abs(fixOffset - scaledWidth * holder.page) / colWidth;
+            row = yOffset / rowHeight;
+        }
+
+        holder.col = (MathUtils.ceil(col) - col < 0.00001) ? MathUtils.ceil(col) : MathUtils.floor(col);
+        holder.row = (MathUtils.ceil(row) - row < 0.00001) ? MathUtils.ceil(row) : MathUtils.floor(row);
+
         return holder;
     }
 
@@ -109,10 +108,12 @@ class PagesLoader {
         }
 
         Holder holder = getPageAndCoordsByOffset(newOffset);
+
         int documentPage = documentPage(holder.page);
         if (documentPage < 0) {
             return 0;
         }
+
         loadThumbnail(holder.page, documentPage);
 
         if (pdfView.isSwipeVertical()) {
@@ -246,11 +247,11 @@ class PagesLoader {
         cacheOrder = 1;
         int loaded = loadVisible();
         if (pdfView.getScrollDir().equals(PDFView.ScrollDir.END)) { // if scrolling to end, preload next view
-            for (int i = 0; i < Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i++) {
+            for (int i = loaded; i < loaded+Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i++) {
                 loaded += loadRelative(i, loaded, true);
             }
         } else { // if scrolling to start, preload previous view
-            for (int i = 0; i > -Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i--) {
+            for (int i = -1; i > -loaded-Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i--) {
                 loaded += loadRelative(i, loaded, false);
             }
         }
