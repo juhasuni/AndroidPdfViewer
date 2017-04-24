@@ -305,6 +305,8 @@ public class PDFView extends RelativeLayout {
     private PaintFlagsDrawFilter antialiasFilter =
             new PaintFlagsDrawFilter(0, Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
+    private CachedCanvas cachedCanvas;
+
     /**
      * Construct the initial view
      */
@@ -327,6 +329,10 @@ public class PDFView extends RelativeLayout {
 
         pdfiumCore = new PdfiumCore(context);
         setWillNotDraw(false);
+
+        // we need to keep the current canvas cached for
+        // best zoom quality
+        setDrawingCacheEnabled(true);
     }
 
     private void load(DocumentSource docSource, String password, OnLoadCompleteListener listener, OnErrorListener onErrorListener) {
@@ -635,6 +641,14 @@ public class PDFView extends RelativeLayout {
             drawPart(canvas, part);
         }
 
+        if (cachedCanvas != null && cachedCanvas.isValid()) {
+            Rect srcRect = new Rect(0, 0, cachedCanvas.bitmap.getWidth(), cachedCanvas.bitmap.getHeight());
+            RectF dstRect = new RectF(0, 0, getWidth(), getHeight());
+            canvas.translate(-currentXOffset, -currentYOffset);
+            canvas.drawBitmap(cachedCanvas.bitmap, srcRect, dstRect, paint);
+            canvas.translate(currentXOffset, currentYOffset);
+        }
+
         // Draws parts
         for (PagePart part : cacheManager.getPageParts()) {
             drawPart(canvas, part);
@@ -688,7 +702,9 @@ public class PDFView extends RelativeLayout {
         // If we use float values for this rectangle, there will be
         // a possible gap between page parts, especially when
         // the zoom level is high.
-        RectF dstRect = new RectF((int) offsetX, (int) offsetY,
+        RectF dstRect = new RectF(
+                (int) offsetX,
+                (int) offsetY,
                 (int) (offsetX + width),
                 (int) (offsetY + height));
 
@@ -788,11 +804,10 @@ public class PDFView extends RelativeLayout {
      */
     public void onBitmapRendered(PagePart part) {
         // when it is first rendered part
+        boolean triggerInitialRender = false;
         if (state == State.LOADED) {
             state = State.SHOWN;
-            if (onRenderListener != null) {
-                onRenderListener.onInitiallyRendered(getPageCount(), optimalPageWidth, optimalPageHeight);
-            }
+            triggerInitialRender = true;
         }
 
         if (part.isThumbnail()) {
@@ -800,7 +815,12 @@ public class PDFView extends RelativeLayout {
         } else {
             cacheManager.cachePart(part);
         }
+
         redraw();
+
+        if (triggerInitialRender && onRenderListener != null) {
+            onRenderListener.onInitiallyRendered(getPageCount(), optimalPageWidth, optimalPageHeight);
+        }
     }
 
     /**
@@ -1075,6 +1095,32 @@ public class PDFView extends RelativeLayout {
         return currentPage;
     }
 
+    public int getCurrentDocumentPage() {
+        int documentPage = getDocumentPage(getCurrentPage());
+        if (documentPage < 0) {
+            return 0;
+        } else {
+            return documentPage;
+        }
+    }
+
+    public int getDocumentPage(int userPage) {
+        int documentPage = userPage;
+        if (getFilteredUserPages() != null) {
+            if (userPage < 0 || userPage >= getFilteredUserPages().length) {
+                return -1;
+            } else {
+                documentPage = getFilteredUserPages()[userPage];
+            }
+        }
+
+        if (documentPage < 0 || userPage >= getDocumentPageCount()) {
+            return -1;
+        }
+
+        return documentPage;
+    }
+
     public float getCurrentXOffset() {
         return currentXOffset;
     }
@@ -1132,6 +1178,8 @@ public class PDFView extends RelativeLayout {
             return; // do nothing if already started
         }
 
+        cachedCanvas = null;
+
         isZooming = true;
         if (onZoomListener != null) {
             onZoomListener.onZoomStart(getZoom());
@@ -1140,6 +1188,8 @@ public class PDFView extends RelativeLayout {
 
     public void triggerZoomEnd() {
         isZooming = false;
+        this.cachedCanvas = new CachedCanvas(this);
+
         if (onZoomListener != null) {
             onZoomListener.onZoomEnd(getZoom());
         }
@@ -1163,7 +1213,7 @@ public class PDFView extends RelativeLayout {
         // the PDF the origin is in the bottom-left corner.
         PdfDocument.Position pos = pdfiumCore.deviceToPage(
                 pdfDocument,
-                getCurrentPage(),
+                getCurrentDocumentPage(),
                 0,
                 0,
                 contentWidth,
@@ -1176,7 +1226,7 @@ public class PDFView extends RelativeLayout {
         if (pos != null) {
             // Find link from given PDF position
             PdfDocument.Link link = pdfiumCore.getLinkAtPoint(
-                    this.pdfDocument, this.getCurrentPage(), pos.getX(), pos.getY());
+                    this.pdfDocument, getCurrentDocumentPage(), pos.getX(), pos.getY());
 
             if (link != null && this.onAnnotationLinkTapListener != null) {
                 this.onAnnotationLinkTapListener.onSingleTapLink(link);
@@ -1331,6 +1381,31 @@ public class PDFView extends RelativeLayout {
     }
 
     private enum State {DEFAULT, LOADED, SHOWN, ERROR}
+
+    private class CachedCanvas {
+        PDFView pdfView;
+        Bitmap bitmap;
+        float xOffset;
+        float yOffset;
+        float zoom;
+
+        CachedCanvas(PDFView pdfView) {
+            this.pdfView = pdfView;
+            xOffset = pdfView.currentXOffset;
+            yOffset = pdfView.currentYOffset;
+            zoom = pdfView.zoom;
+            bitmap = pdfView.getDrawingCache();
+        }
+
+        boolean isValid() {
+            return zoom == pdfView.zoom &&
+                    xOffset == pdfView.currentXOffset &&
+                    yOffset == pdfView.currentYOffset &&
+                    bitmap != null &&
+                    !bitmap.isRecycled();
+        }
+    }
+
 
     public class Configurator {
 
