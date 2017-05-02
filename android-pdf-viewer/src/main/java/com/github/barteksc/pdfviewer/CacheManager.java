@@ -21,61 +21,44 @@ import android.support.annotation.Nullable;
 import com.github.barteksc.pdfviewer.model.PagePart;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 
 import static com.github.barteksc.pdfviewer.util.Constants.Cache.CACHE_SIZE;
 import static com.github.barteksc.pdfviewer.util.Constants.Cache.THUMBNAILS_CACHE_SIZE;
 
 class CacheManager {
 
-    private final PriorityQueue<PagePart> passiveCache;
+    private final PagePartCache passiveCache;
 
-    private final PriorityQueue<PagePart> activeCache;
+    private final PagePartCache activeCache;
 
     private final List<PagePart> thumbnails;
 
-    private final Object passiveActiveLock = new Object();
-
-    private final PagePartComparator comparator = new PagePartComparator();
-
     public CacheManager() {
-        activeCache = new PriorityQueue<>(CACHE_SIZE, comparator);
-        passiveCache = new PriorityQueue<>(CACHE_SIZE, comparator);
+        activeCache = new PagePartCache(CACHE_SIZE);
+        passiveCache = new PagePartCache(CACHE_SIZE);
         thumbnails = new ArrayList<>();
     }
 
     public void cachePart(PagePart part) {
-        synchronized (passiveActiveLock) {
-            // If cache too big, remove and recycle
-            makeAFreeSpace();
+        // If cache too big, remove and recycle
+        makeAFreeSpace();
 
-            // Then add part
-            activeCache.offer(part);
-        }
+        // Then add part
+        activeCache.offer(part);
     }
 
     public void makeANewSet() {
-        synchronized (passiveActiveLock) {
-            passiveCache.addAll(activeCache);
-            activeCache.clear();
-        }
+        passiveCache.appendAll(activeCache);
+        activeCache.clear();
     }
 
     private void makeAFreeSpace() {
-        synchronized (passiveActiveLock) {
-            while ((activeCache.size() + passiveCache.size()) >= CACHE_SIZE &&
-                    !passiveCache.isEmpty()) {
-                PagePart part = passiveCache.poll();
-                part.getRenderedBitmap().recycle();
-            }
-
-            while ((activeCache.size() + passiveCache.size()) >= CACHE_SIZE &&
-                    !activeCache.isEmpty()) {
-                activeCache.poll().getRenderedBitmap().recycle();
-            }
-        }
+        passiveCache.free((activeCache.size() + passiveCache.size()) - CACHE_SIZE);
+        activeCache.free((activeCache.size() + passiveCache.size()) - CACHE_SIZE);
     }
 
     public void cacheThumbnail(PagePart part) {
@@ -95,16 +78,14 @@ class CacheManager {
         PagePart fakePart = new PagePart(userPage, page, null, width, height, pageRelativeBounds, false, 0);
 
         PagePart found;
-        synchronized (passiveActiveLock) {
-            if ((found = find(passiveCache, fakePart)) != null) {
-                passiveCache.remove(found);
-                found.setCacheOrder(toOrder);
-                activeCache.offer(found);
-                return true;
-            }
-
-            return find(activeCache, fakePart) != null;
+        if ((found = passiveCache.find(fakePart)) != null) {
+            passiveCache.remove(found);
+            found.setCacheOrder(toOrder);
+            activeCache.offer(found);
+            return true;
         }
+
+        return activeCache.find(fakePart) != null;
     }
 
     /**
@@ -122,22 +103,11 @@ class CacheManager {
         }
     }
 
-    @Nullable
-    private static PagePart find(PriorityQueue<PagePart> vector, PagePart fakePart) {
-        for (PagePart part : vector) {
-            if (part.equals(fakePart)) {
-                return part;
-            }
-        }
-        return null;
-    }
-
     public List<PagePart> getPageParts() {
-        synchronized (passiveActiveLock) {
-            List<PagePart> parts = new ArrayList<>(passiveCache);
-            parts.addAll(activeCache);
-            return parts;
-        }
+        List<PagePart> parts = new ArrayList<>(passiveCache);
+        parts.addAll(activeCache);
+
+        return parts;
     }
 
     public List<PagePart> getThumbnails() {
@@ -147,21 +117,68 @@ class CacheManager {
     }
 
     public void recycle() {
-        synchronized (passiveActiveLock) {
-            for (PagePart part : passiveCache) {
-                part.getRenderedBitmap().recycle();
-            }
-            passiveCache.clear();
-            for (PagePart part : activeCache) {
-                part.getRenderedBitmap().recycle();
-            }
-            activeCache.clear();
-        }
+        passiveCache.recycle();
+        activeCache.recycle();
+
         synchronized (thumbnails) {
             for (PagePart part : thumbnails) {
                 part.getRenderedBitmap().recycle();
             }
             thumbnails.clear();
+        }
+    }
+
+    class PagePartCache extends PriorityBlockingQueue<PagePart> {
+        PagePartCache(int cacheSize) {
+            super(cacheSize, new PagePartComparator());
+        }
+
+        void free(int count) {
+            // The parts with lowest cache order number get freed first
+            for (int i = 0; i < count; i++) {
+                PagePart p = poll();
+                if (!p.getRenderedBitmap().isRecycled()) {
+                    p.getRenderedBitmap().recycle();
+                }
+            }
+        }
+
+        void appendAll(Collection<PagePart> c) {
+
+            // Find the max order number from current parts
+            // and use that as the delta for the new parts to
+            // ensure that added parts appear last in the priority
+            // queue
+            int max = 0;
+            for (PagePart p : this) {
+                max = Math.max(max, p.getCacheOrder());
+            }
+
+            for (PagePart p : c) {
+                p.setCacheOrder(p.getCacheOrder() + max);
+            }
+
+            addAll(c);
+        }
+
+        @Nullable
+        PagePart find(PagePart part) {
+            for (PagePart p : this) {
+                if (p.equals(part)) {
+                    return p;
+                }
+            }
+            return null;
+        }
+
+        void recycle() {
+            for (PagePart p : this) {
+                if (!p.getRenderedBitmap().isRecycled()) {
+                    p.getRenderedBitmap().recycle();
+                }
+            }
+
+            clear();
         }
     }
 
