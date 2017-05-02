@@ -14,7 +14,6 @@ class PagesLoader {
 
     private PDFView pdfView;
 
-
     // variables set on every call to loadPages()
     private int cacheOrder;
     private float scaledHeight;
@@ -58,22 +57,32 @@ class PagesLoader {
 
     private Holder getPageAndCoordsByOffset(float offset) {
         Holder holder = new Holder();
-        float fixOffset = -MathUtils.max(offset, 0);
-        float col, row, page;
-
-        if (pdfView.isSwipeVertical()) {
-            page = MathUtils.floor(fixOffset / scaledHeight);
-        } else {
-            page = MathUtils.floor(fixOffset / scaledWidth);
-        }
+        boolean isVertical = pdfView.isSwipeVertical();
+        float col, row;
+        float scaledPageSize = isVertical ? scaledHeight : scaledWidth;
+        float pageSize = isVertical ? pdfView.getOptimalPageHeight() : pdfView.getOptimalPageWidth();
+        int page = MathUtils.floor(offset / scaledPageSize);
+        float margin = isVertical ? pdfView.getPageMarginVertical() : pdfView.getPageMarginHorizontal();
 
         holder.page = (MathUtils.ceil(page) - page < 0.00001) ? MathUtils.ceil(page) : MathUtils.floor(page);
 
-        if (pdfView.isSwipeVertical()) {
-            row = Math.abs(fixOffset - scaledHeight * holder.page) / rowHeight;
+        float startPos = scaledPageSize * holder.page + margin;
+        float endPos = startPos + pdfView.toCurrentScale(pageSize);
+        float pagePos = Math.min(endPos, offset) - startPos;
+
+        if (isVertical) {
+            if (pagePos > 0) {
+                row = pagePos / rowHeight;
+            } else {
+                row = 0;
+            }
             col = xOffset / colWidth;
         } else {
-            col = Math.abs(fixOffset - scaledWidth * holder.page) / colWidth;
+            if (pagePos > 0) {
+                col = pagePos / colWidth;
+            } else {
+                col = 0;
+            }
             row = yOffset / rowHeight;
         }
 
@@ -88,7 +97,7 @@ class PagesLoader {
                 thumbnailWidth, thumbnailHeight, thumbnailRect)) {
             pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
                     thumbnailWidth, thumbnailHeight, thumbnailRect,
-                    true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering());
+                    true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering(), pdfView.getZoom());
         }
     }
 
@@ -97,18 +106,26 @@ class PagesLoader {
      * @return
      */
     private int loadRelative(int number, int nbOfPartsLoadable, boolean outsideView) {
-        int loaded = 0;
+        boolean isVertical = pdfView.isSwipeVertical();
         float newOffset;
-        if (pdfView.isSwipeVertical()) {
-            float rowsHeight = rowHeight * number + 1;
-            newOffset = pdfView.getCurrentYOffset() - (outsideView ? pdfView.getHeight() : 0) - rowsHeight;
-        } else {
-            float colsWidth = colWidth * number;
-            newOffset = pdfView.getCurrentXOffset() - (outsideView ? pdfView.getWidth() : 0) - colsWidth;
+        float itemSize = isVertical ? rowHeight : colWidth;
+        float itemsTotalSize = itemSize * number;
+        float screenSize = isVertical ? pdfView.getHeight() : pdfView.getWidth();
+        float offset = isVertical ? yOffset : xOffset;
+        float pageOuterWidth = isVertical ? scaledHeight : scaledWidth;
+        newOffset = offset + (outsideView ? screenSize : 0) + itemsTotalSize;
+
+        // Outside the stripe, there's nothing to render
+        if (newOffset >= pdfView.getPageCount() * pageOuterWidth) {
+            return 0;
         }
 
         Holder holder = getPageAndCoordsByOffset(newOffset);
+        return loadStripe(holder, nbOfPartsLoadable);
+    }
 
+    private int loadStripe(Holder holder, int nbOfPartsLoadable) {
+        int loaded = 0;
         int documentPage = documentPage(holder.page);
         if (documentPage < 0) {
             return 0;
@@ -116,79 +133,66 @@ class PagesLoader {
 
         loadThumbnail(holder.page, documentPage);
 
-        if (pdfView.isSwipeVertical()) {
-            int firstCol = MathUtils.floor(xOffset / colWidth);
-            firstCol = MathUtils.min(firstCol - 1, 0);
-            int lastCol = MathUtils.ceil((xOffset + pdfView.getWidth()) / colWidth);
-            lastCol = MathUtils.max(lastCol + 1, colsRows.first);
-            for (int col = firstCol; col <= lastCol; col++) {
-                if (loadCell(holder.page, documentPage, holder.row, col, pageRelativePartWidth, pageRelativePartHeight)) {
-                    loaded++;
-                }
-                if (loaded >= nbOfPartsLoadable) {
-                    return loaded;
-                }
+        boolean isVertical = pdfView.isSwipeVertical();
+        int max = isVertical ? colsRows.first : colsRows.second;
+        int first = isVertical ? holder.col : holder.row; // first visible row/col
+        int stripeLength = isVertical ? pdfView.getWidth() : pdfView.getHeight();
+        float itemLength = isVertical ? colWidth : rowHeight;
+        int itemsPerScreen = MathUtils.ceil(stripeLength / itemLength);
+        int last = first + itemsPerScreen; // + one extra row/col
+        last = Math.min(last, max);
+
+        for (int i = first; i <= last; i++) {
+            if (loadCell(holder.page, documentPage, (isVertical ? holder.row : i), (isVertical ? i : holder.col), pageRelativePartWidth, pageRelativePartHeight)) {
+                loaded++;
             }
-        } else {
-            int firstRow = MathUtils.floor(yOffset / rowHeight);
-            firstRow = MathUtils.min(firstRow - 1, 0);
-            int lastRow = MathUtils.ceil((yOffset + pdfView.getHeight()) / rowHeight);
-            lastRow = MathUtils.max(lastRow + 1, colsRows.second);
-            for (int row = firstRow; row <= lastRow; row++) {
-                if (loadCell(holder.page, documentPage, row, holder.col, pageRelativePartWidth, pageRelativePartHeight)) {
-                    loaded++;
-                }
-                if (loaded >= nbOfPartsLoadable) {
-                    return loaded;
-                }
+            if (loaded >= nbOfPartsLoadable) {
+                return loaded;
             }
         }
 
         return loaded;
     }
 
+
     public int loadVisible() {
         int parts = 0;
         Holder firstHolder, lastHolder;
-        if (pdfView.isSwipeVertical()) {
-            firstHolder = getPageAndCoordsByOffset(pdfView.getCurrentYOffset());
-            lastHolder = getPageAndCoordsByOffset(pdfView.getCurrentYOffset() - pdfView.getHeight() + 1);
-            int visibleRows = 0;
-            if (firstHolder.page == lastHolder.page) {
-                visibleRows = lastHolder.row - firstHolder.row + 1;
-            } else {
-                visibleRows += colsRows.second - firstHolder.row;
-                for (int page = firstHolder.page + 1; page < lastHolder.page; page++) {
-                    visibleRows += colsRows.second;
-                }
-                visibleRows += lastHolder.row + 1;
+        boolean isVertical = pdfView.isSwipeVertical();
+        float offset = isVertical ? yOffset : xOffset;
+        int pageSize = isVertical ? pdfView.getHeight() : pdfView.getWidth();
+        float optimalPageSize = isVertical ? pdfView.getOptimalPageHeight() : pdfView.getOptimalPageWidth();
+
+        firstHolder = getPageAndCoordsByOffset(offset);
+        lastHolder = getPageAndCoordsByOffset(offset + pageSize - 1);
+        float stripeLength = isVertical ? rowHeight : colWidth;
+
+        int stripesPerPage = MathUtils.ceil(pdfView.toCurrentScale(optimalPageSize) / stripeLength);
+
+        for (int p = firstHolder.page; p <= lastHolder.page; p++) {
+            int first = 0;
+            if (p == lastHolder.page) {
+                stripesPerPage = lastHolder.col + 1;
             }
 
-            for (int i = 0; i < visibleRows && parts < CACHE_SIZE; i++) {
-                parts += loadRelative(i, CACHE_SIZE - parts, false);
-            }
-        } else {
-            firstHolder = getPageAndCoordsByOffset(pdfView.getCurrentXOffset());
-            lastHolder = getPageAndCoordsByOffset(pdfView.getCurrentXOffset() - pdfView.getWidth() + 1);
-            int visibleCols = 0;
-            if (firstHolder.page == lastHolder.page) {
-                visibleCols = lastHolder.col - firstHolder.col + 1;
-            } else {
-                visibleCols += colsRows.first - firstHolder.col;
-                for (int page = firstHolder.page + 1; page < lastHolder.page; page++) {
-                    visibleCols += colsRows.first;
-                }
-                visibleCols += lastHolder.col + 1;
+            if (p == firstHolder.page) {
+                first = firstHolder.col;
             }
 
-            for (int i = 0; i < visibleCols && parts < CACHE_SIZE; i++) {
-                parts += loadRelative(i, CACHE_SIZE - parts, false);
+            for (int i = first; i < stripesPerPage && parts < CACHE_SIZE; i++) {
+                Holder holder = new Holder();
+                holder.page = p;
+                holder.row = isVertical ? i : firstHolder.row;
+                holder.col = isVertical ? firstHolder.col : i;
+                parts += loadStripe(holder, CACHE_SIZE - parts);
             }
         }
+
         int prevDocPage = documentPage(firstHolder.page - 1);
         if (prevDocPage >= 0) {
             loadThumbnail(firstHolder.page - 1, prevDocPage);
         }
+
         int nextDocPage = documentPage(firstHolder.page + 1);
         if (nextDocPage >= 0) {
             loadThumbnail(firstHolder.page + 1, nextDocPage);
@@ -221,7 +225,7 @@ class PagesLoader {
             if (!pdfView.cacheManager.upPartIfContained(userPage, documentPage, renderWidth, renderHeight, pageRelativeBounds, cacheOrder)) {
                 pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
                         renderWidth, renderHeight, pageRelativeBounds, false, cacheOrder,
-                        pdfView.isBestQuality(), pdfView.isAnnotationRendering());
+                        pdfView.isBestQuality(), pdfView.isAnnotationRendering(), pdfView.getZoom());
             }
 
             cacheOrder++;
@@ -231,29 +235,32 @@ class PagesLoader {
     }
 
     public void loadPages() {
-        scaledHeight = pdfView.toCurrentScale(pdfView.getOptimalPageHeight());
-        scaledWidth = pdfView.toCurrentScale(pdfView.getOptimalPageWidth());
+        scaledHeight = pdfView.getPageOuterHeight();
+        scaledWidth = pdfView.getPageOuterWidth();
         thumbnailWidth = (int) (pdfView.getOptimalPageWidth() * Constants.THUMBNAIL_RATIO);
         thumbnailHeight = (int) (pdfView.getOptimalPageHeight() * Constants.THUMBNAIL_RATIO);
         colsRows = getPageColsRows();
         xOffset = -MathUtils.max(pdfView.getCurrentXOffset(), 0);
         yOffset = -MathUtils.max(pdfView.getCurrentYOffset(), 0);
-        rowHeight = scaledHeight / colsRows.second;
-        colWidth = scaledWidth / colsRows.first;
+        rowHeight = pdfView.toCurrentScale(pdfView.getOptimalPageHeight()) / colsRows.second;
+        colWidth = pdfView.toCurrentScale(pdfView.getOptimalPageWidth()) / colsRows.first;
         pageRelativePartWidth = 1f / (float) colsRows.first;
         pageRelativePartHeight = 1f / (float) colsRows.second;
         partRenderWidth = Constants.PART_SIZE / pageRelativePartWidth;
         partRenderHeight = Constants.PART_SIZE / pageRelativePartHeight;
         cacheOrder = 1;
         int loaded = loadVisible();
-        if (pdfView.getScrollDir().equals(PDFView.ScrollDir.END)) { // if scrolling to end, preload next view
-            for (int i = loaded; i < loaded+Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i++) {
-                loaded += loadRelative(i, loaded, true);
-            }
-        } else { // if scrolling to start, preload previous view
-            for (int i = -1; i > -loaded-Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i--) {
-                loaded += loadRelative(i, loaded, false);
+        if (pdfView.getZoom() == 1) {
+            if (pdfView.getScrollDir().equals(PDFView.ScrollDir.END)) { // if scrolling to end, preload next view
+                for (int i = 0; i < Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i++) {
+                    loaded += loadRelative(i, loaded, true);
+                }
+            } else if (pdfView.getScrollDir().equals(PDFView.ScrollDir.START)) { // if scrolling to start, preload previous view
+                for (int i = -1; i > -loaded-Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i--) {
+                    loaded += loadRelative(i, loaded, false);
+                }
             }
         }
+
     }
 }
