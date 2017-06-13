@@ -17,12 +17,15 @@ package com.github.barteksc.pdfviewer;
 
 import android.graphics.RectF;
 import android.support.annotation.Nullable;
+import android.util.Log;
 
 import com.github.barteksc.pdfviewer.model.PagePart;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.PriorityBlockingQueue;
 
@@ -31,11 +34,33 @@ import static com.github.barteksc.pdfviewer.util.Constants.Cache.THUMBNAILS_CACH
 
 class CacheManager {
 
-    private final PagePartCache passiveCache;
+    private static final int PASSIVE_CACHE = 1;
 
-    private final PagePartCache activeCache;
+    private static final int ACTIVE_CACHE = 2;
 
-    private final List<PagePart> thumbnails;
+    private static final ArrayList<WeakReference<CacheManager>> managers = new ArrayList<>();
+
+    private PagePartCache passiveCache;
+
+    private PagePartCache activeCache;
+
+    private List<PagePart> thumbnails;
+
+    public static CacheManager create() {
+        synchronized (CacheManager.managers) {
+            // remove null references
+            for (Iterator<WeakReference<CacheManager>> iterator = managers.iterator(); iterator.hasNext();) {
+                WeakReference<CacheManager> ref = iterator.next();
+                if (ref == null) {
+                    iterator.remove();
+                }
+            }
+
+            CacheManager manager = new CacheManager();
+            managers.add(new WeakReference<CacheManager>(manager));
+            return manager;
+        }
+    }
 
     public CacheManager() {
         activeCache = new PagePartCache(CACHE_SIZE);
@@ -44,8 +69,46 @@ class CacheManager {
     }
 
     public void cachePart(PagePart part) {
+
         // If cache too big, remove and recycle
-        makeAFreeSpace();
+        int totalSize = 0;
+
+        synchronized (CacheManager.managers) {
+            for (WeakReference<CacheManager> ref : CacheManager.managers) {
+                if (ref.get() != null) {
+                    totalSize += ref.get().size();
+                }
+            }
+
+            if (totalSize >= CACHE_SIZE) {
+                int sizeToFree = 10;
+                int[] caches = {PASSIVE_CACHE, ACTIVE_CACHE};
+
+                for (int cacheType : caches) {
+                    for (WeakReference<CacheManager> ref : managers) {
+                        if (ref.get() != null && ref.get() != this) {
+                            sizeToFree -= ref.get().free(cacheType, sizeToFree);
+                        }
+
+                        if (sizeToFree <= 0) {
+                            break;
+                        }
+                    }
+
+                    if (sizeToFree <= 0) {
+                        break;
+                    }
+                }
+
+                for (int cacheType : caches) {
+                    sizeToFree -= this.free(cacheType, sizeToFree);
+                    if (sizeToFree > 0) {
+                        break;
+                    }
+                }
+            }
+        }
+
 
         // Then add part
         activeCache.offer(part);
@@ -56,22 +119,55 @@ class CacheManager {
         activeCache.clear();
     }
 
-    private void makeAFreeSpace() {
-        passiveCache.free((activeCache.size() + passiveCache.size()) - CACHE_SIZE);
-        activeCache.free((activeCache.size() + passiveCache.size()) - CACHE_SIZE);
+    public int size() {
+        return passiveCache.size() + activeCache.size();
+    }
+
+    private int free(int cacheType, int size) {
+        PagePartCache cache = cacheType == PASSIVE_CACHE ? passiveCache : activeCache;
+        return cache.free(size);
+    }
+
+    private boolean recycleThumbnail() {
+        synchronized (thumbnails) {
+            if (this.thumbnails.size() > 0) {
+                this.thumbnails.remove(0).getRenderedBitmap().recycle();
+                return true;
+            } else {
+                return false;
+            }
+        }
     }
 
     public void cacheThumbnail(PagePart part) {
         synchronized (thumbnails) {
+            int totalSize = 0;
+            for (WeakReference<CacheManager> ref : CacheManager.managers) {
+                if (ref.get() != null) {
+                    totalSize += ref.get().thumbnails.size();
+                }
+            }
+
             // If cache too big, remove and recycle
-            if (thumbnails.size() >= THUMBNAILS_CACHE_SIZE) {
-                thumbnails.remove(0).getRenderedBitmap().recycle();
+            if (totalSize >= THUMBNAILS_CACHE_SIZE) {
+                boolean freed = false;
+
+                for (WeakReference<CacheManager> ref : CacheManager.managers) {
+                    CacheManager manager = ref.get();
+                    if (manager != null && manager != this && manager.recycleThumbnail()) {
+                        freed = true;
+                        break;
+                    }
+                }
+
+                if (!freed && this.thumbnails.size() > 0) {
+                    this.recycleThumbnail();
+                }
             }
 
             // Then add thumbnail
             thumbnails.add(part);
         }
-
     }
 
     public boolean upPartIfContained(int userPage, int page, float width, float height, RectF pageRelativeBounds, int toOrder) {
@@ -117,30 +213,43 @@ class CacheManager {
     }
 
     public void recycle() {
+
         passiveCache.recycle();
         activeCache.recycle();
 
         synchronized (thumbnails) {
             for (PagePart part : thumbnails) {
-                part.getRenderedBitmap().recycle();
+                if (!part.getRenderedBitmap().isRecycled()) {
+                    part.getRenderedBitmap().recycle();
+                }
             }
             thumbnails.clear();
         }
     }
+
 
     class PagePartCache extends PriorityBlockingQueue<PagePart> {
         PagePartCache(int cacheSize) {
             super(cacheSize, new PagePartComparator());
         }
 
-        void free(int count) {
+        int free(int count) {
+            int freed = 0;
+
             // The parts with lowest cache order number get freed first
             for (int i = 0; i < count; i++) {
                 PagePart p = poll();
+                if (p == null) {
+                    break;
+                }
+
                 if (!p.getRenderedBitmap().isRecycled()) {
+                    freed++;
                     p.getRenderedBitmap().recycle();
                 }
             }
+
+            return freed;
         }
 
         void appendAll(Collection<PagePart> c) {
@@ -191,5 +300,4 @@ class CacheManager {
             return part1.getCacheOrder() > part2.getCacheOrder() ? 1 : -1;
         }
     }
-
 }
