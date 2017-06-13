@@ -20,6 +20,7 @@ import android.animation.Animator.AnimatorListener;
 import android.animation.ValueAnimator;
 import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.graphics.PointF;
+import android.view.ViewConfiguration;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Scroller;
 
@@ -101,14 +102,35 @@ class AnimationManager {
         }
     }
 
-    class XAnimation implements AnimatorUpdateListener {
+    class XAnimation implements AnimatorUpdateListener, AnimatorListener {
 
         @Override
         public void onAnimationUpdate(ValueAnimator animation) {
             float offset = (Float) animation.getAnimatedValue();
             pdfView.moveTo(offset, pdfView.getCurrentYOffset());
+            pdfView.loadPageByOffset();
         }
 
+        @Override
+        public void onAnimationStart(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationEnd(Animator animation) {
+            pdfView.loadPages();
+            hideHandle();
+        }
+
+        @Override
+        public void onAnimationCancel(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationRepeat(Animator animation) {
+
+        }
     }
 
     class YAnimation implements AnimatorUpdateListener {
@@ -196,5 +218,4 @@ class AnimationManager {
             pdfView.getScrollHandle().hideDelayed();
         }
     }
-
 }
