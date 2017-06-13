@@ -44,6 +44,10 @@ class AnimationManager {
     public AnimationManager(PDFView pdfView) {
         this.pdfView = pdfView;
         scroller = new Scroller(pdfView.getContext(), null, true);
+
+        if (pdfView.isPaging()) {
+            scroller.setFriction(ViewConfiguration.getScrollFriction() * 10);
+        }
     }
 
     public void startXAnimation(float xFrom, float xTo) {
@@ -200,6 +204,10 @@ class AnimationManager {
         public void onAnimationEnd(Animator animation) {
             pdfView.loadPages();
             hideHandle();
+
+            if (pdfView.isPaging() && !pdfView.isZooming()) {
+                pdfView.jumpTo(pdfView.getCurrentPage(), true);
+            }
         }
 
         @Override
