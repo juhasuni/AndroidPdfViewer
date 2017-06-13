@@ -2,7 +2,6 @@ package com.github.barteksc.pdfviewer;
 
 
 import android.graphics.RectF;
-import android.util.Log;
 import android.util.Pair;
 
 import com.github.barteksc.pdfviewer.util.Constants;
@@ -96,7 +95,7 @@ class PagesLoader {
     private void loadThumbnail(int userPage, int documentPage) {
         if (!pdfView.cacheManager.containsThumbnail(userPage, documentPage,
                 thumbnailWidth, thumbnailHeight, thumbnailRect)) {
-            pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
+            pdfView.thumbnailRenderingHandler.addRenderingTask(userPage, documentPage,
                     thumbnailWidth, thumbnailHeight, thumbnailRect,
                     true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering());
         }
@@ -232,7 +231,7 @@ class PagesLoader {
 
         if (renderWidth > 0 && renderHeight > 0) {
             if (!pdfView.cacheManager.upPartIfContained(userPage, documentPage, renderWidth, renderHeight, pageRelativeBounds, cacheOrder)) {
-                pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
+                pdfView.detailsRenderingHandler.addRenderingTask(userPage, documentPage,
                         renderWidth, renderHeight, pageRelativeBounds, false, cacheOrder,
                         pdfView.isBestQuality(), pdfView.isAnnotationRendering());
             }
