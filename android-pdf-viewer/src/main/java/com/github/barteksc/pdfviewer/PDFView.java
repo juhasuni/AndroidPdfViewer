@@ -204,14 +204,24 @@ public class PDFView extends RelativeLayout {
     private State state = State.DEFAULT;
 
     /**
-     * The thread {@link #renderingHandler} will run on
+     * The thread {@link #detailsRenderingHandler} will run on
      */
-    private HandlerThread renderingThread;
+    private HandlerThread detailsRenderingThread;
 
     /**
     * Handler always waiting in the background and rendering tasks
     */
-    RenderingHandler renderingHandler;
+    RenderingHandler detailsRenderingHandler;
+
+    /**
+     * The thread {@link #thumbnailRenderingHandler} will run on
+     */
+    private HandlerThread thumbnailRenderingThread;
+
+    /**
+     * Handler always waiting in the background and rendering tasks
+     */
+    RenderingHandler thumbnailRenderingHandler;
 
     private PagesLoader pagesLoader;
 
@@ -309,7 +319,7 @@ public class PDFView extends RelativeLayout {
     private PaintFlagsDrawFilter antialiasFilter =
             new PaintFlagsDrawFilter(0, Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 
-    private boolean enablePaging = false;
+    private boolean enablePaging = true;
 
     /**
      * Draw preview only
@@ -566,17 +576,26 @@ public class PDFView extends RelativeLayout {
         animationManager.stopAll();
 
         // Stop tasks
-        if (renderingHandler != null) {
-            renderingHandler.stop();
-            renderingHandler.cancel();
+        if (detailsRenderingHandler != null) {
+            detailsRenderingHandler.cancel();
+            detailsRenderingHandler.stop();
+        }
+
+        if (thumbnailRenderingHandler != null) {
+            thumbnailRenderingHandler.cancel();
+            thumbnailRenderingHandler.stop();
         }
 
         if (decodingTask != null) {
             decodingTask.requestCancel();
         }
 
-        if (renderingThread != null) {
-            renderingThread.quit();
+        if (detailsRenderingThread != null) {
+            detailsRenderingThread.quit();
+        }
+
+        if (thumbnailRenderingThread != null) {
+            thumbnailRenderingThread.quit();
         }
 
         // Clear caches
@@ -590,9 +609,9 @@ public class PDFView extends RelativeLayout {
             documentLoader.unload(documentSource, pdfiumCore);
         }
 
-        renderingThread = null;
+        detailsRenderingThread = null;
         documentSource = null;
-        renderingHandler = null;
+        detailsRenderingHandler = null;
         originalUserPages = null;
         filteredUserPages = null;
         filteredUserPageIndexes = null;
@@ -785,12 +804,12 @@ public class PDFView extends RelativeLayout {
      * the current page displayed
      */
     public void loadPages() {
-        if (optimalPageWidth == 0 || optimalPageHeight == 0 || renderingHandler == null) {
+        if (optimalPageWidth == 0 || optimalPageHeight == 0 || detailsRenderingHandler == null) {
             return;
         }
 
         // Cancel all current tasks
-        renderingHandler.cancel();
+        detailsRenderingHandler.cancel();
         cacheManager.makeANewSet();
 
         pagesLoader.loadPages();
@@ -812,7 +831,11 @@ public class PDFView extends RelativeLayout {
 
         pagesLoader = new PagesLoader(this);
 
-        initRenderingHandler();
+        detailsRenderingThread = new HandlerThread("PDF render details");
+        detailsRenderingHandler = initRenderingHandler(detailsRenderingThread);
+
+        thumbnailRenderingThread = new HandlerThread("PDF render thumbnails");
+        thumbnailRenderingHandler = initRenderingHandler(thumbnailRenderingThread);
 
         if (scrollHandle != null) {
             scrollHandle.setupLayout(this);
@@ -826,8 +849,7 @@ public class PDFView extends RelativeLayout {
         jumpTo(defaultPage, false);
     }
 
-    void initRenderingHandler() {
-        renderingThread = new HandlerThread("PDF render");
+    RenderingHandler initRenderingHandler(HandlerThread renderingThread) {
 
         if (!this.getPreviewOnly()) {
             renderingThread.setPriority(Thread.MAX_PRIORITY);
@@ -837,14 +859,15 @@ public class PDFView extends RelativeLayout {
             renderingThread.start();
         }
 
-        if (renderingHandler != null) {
-            renderingHandler.cancel();
-            renderingHandler.stop();
+        if (detailsRenderingHandler != null) {
+            detailsRenderingHandler.cancel();
+            detailsRenderingHandler.stop();
         }
 
-        renderingHandler = new RenderingHandler(renderingThread.getLooper(),
+        detailsRenderingHandler = new RenderingHandler(renderingThread.getLooper(),
                 this, cacheManager, pdfiumCore, pdfDocument);
-        renderingHandler.start();
+        detailsRenderingHandler.start();
+        return detailsRenderingHandler;
     }
 
     void loadError(Throwable t) {
@@ -979,6 +1002,10 @@ public class PDFView extends RelativeLayout {
             // Check Y offset
             if (getPageCount() * toCurrentScale(optimalPageHeight) < getHeight()) { // whole document height visible on screen
                 offsetY = (getHeight() - getPageCount() * toCurrentScale(optimalPageHeight)) / 2;
+            } else if (isPaging() && isZooming()) { // limit to current page bounds when zooming and paging
+                offsetY = Math.max(
+                        (-(currentPage+1) * toCurrentScale(optimalPageHeight) + getHeight()),
+                        Math.min(-currentPage * toCurrentScale(optimalPageHeight), offsetY));
             } else {
                 if (offsetY > 0) { // top visible
                     offsetY = 0;
@@ -1009,6 +1036,10 @@ public class PDFView extends RelativeLayout {
             // Check X offset
             if (getPageCount() * toCurrentScale(optimalPageWidth) < getWidth()) { // whole document width visible on screen
                 offsetX = (getWidth() - getPageCount() * toCurrentScale(optimalPageWidth)) / 2;
+            } else if (isPaging() && isZooming()) { // limit to current page bounds when zooming and paging
+                offsetX = Math.max(
+                        (-(currentPage+1) * toCurrentScale(optimalPageWidth) + getWidth()),
+                        Math.min(-currentPage * toCurrentScale(optimalPageWidth), offsetX));
             } else {
                 if (offsetX > 0) { // left visible
                     offsetX = 0;
@@ -1399,13 +1430,13 @@ public class PDFView extends RelativeLayout {
         }
 
 
-        if (renderingThread != null) {
-            renderingThread.setPriority(previewOnly ? Thread.NORM_PRIORITY : Thread.MAX_PRIORITY);
+        if (detailsRenderingThread != null) {
+            detailsRenderingThread.setPriority(previewOnly ? Thread.NORM_PRIORITY : Thread.MAX_PRIORITY);
         }
 
-        if (previewOnly && renderingHandler != null) {
+        if (previewOnly && detailsRenderingHandler != null) {
             Log.d("PDFView", "cancel render page " + filteredUserPages[0]);
-            renderingHandler.cancel();
+            detailsRenderingHandler.cancel();
         }
 
         if (!previewOnly) {
