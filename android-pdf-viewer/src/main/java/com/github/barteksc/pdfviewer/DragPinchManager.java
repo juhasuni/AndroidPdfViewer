@@ -33,6 +33,7 @@ import static com.github.barteksc.pdfviewer.util.Constants.Pinch.MINIMUM_ZOOM;
 class DragPinchManager implements GestureDetector.OnGestureListener, GestureDetector.OnDoubleTapListener, ScaleGestureDetector.OnScaleGestureListener, View.OnTouchListener {
 
     static float MIN_FLING_PAGING_VELOCITY = 4000;
+    static float MIN_FLING_PAGING_DISTANCE = 100;
 
     private PDFView pdfView;
     private AnimationManager animationManager;
@@ -160,17 +161,14 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     @Override
     public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-        int xOffset = (int) pdfView.getCurrentXOffset();
-        int yOffset = (int) pdfView.getCurrentYOffset();
-        float minX = xOffset * (swipeVertical ? 2 : pdfView.getPageCount()+1);
-        float minY = yOffset * (swipeVertical ? pdfView.getPageCount()+1 : 2);
-        float maxX = 0, maxY = 0;
-
         if (pdfView.isPaging() && !pdfView.isZooming()) {
             float velocity = swipeVertical ? velocityY : velocityX;
+            float positionStart = swipeVertical ? e1.getY() : e1.getX();
+            float positionEnd = swipeVertical ? e2.getY() : e2.getX();
             boolean forward = velocity < 0;
 
-            if (Math.abs(velocity) > MIN_FLING_PAGING_VELOCITY) {
+            if (Math.abs(velocity) > MIN_FLING_PAGING_VELOCITY
+                && Math.abs(positionStart-positionEnd) >= MIN_FLING_PAGING_DISTANCE) {
                 int page = Math.min(pdfView.getPageCount()-1, Math.max(0, forward ? currentPage+1 : currentPage-1));
 
                 if (page != currentPage) {
@@ -179,6 +177,12 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
                 }
             }
         }
+
+        int xOffset = (int) pdfView.getCurrentXOffset();
+        int yOffset = (int) pdfView.getCurrentYOffset();
+        float minX = xOffset * (swipeVertical ? 2 : pdfView.getPageCount()+1);
+        float minY = yOffset * (swipeVertical ? pdfView.getPageCount()+1 : 2);
+        float maxX = 0, maxY = 0;
 
         animationManager.startFlingAnimation(
                 xOffset,
