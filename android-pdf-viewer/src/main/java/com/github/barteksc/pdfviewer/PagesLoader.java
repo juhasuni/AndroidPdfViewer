@@ -30,6 +30,7 @@ class PagesLoader {
     private int thumbnailWidth;
     private int thumbnailHeight;
     private final RectF thumbnailRect = new RectF(0, 0, 1, 1);
+    private boolean previewOnly;
 
     private class Holder {
         int page;
@@ -97,7 +98,7 @@ class PagesLoader {
                 thumbnailWidth, thumbnailHeight, thumbnailRect)) {
             pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
                     thumbnailWidth, thumbnailHeight, thumbnailRect,
-                    true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering(), pdfView.getZoom());
+                    true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering());
         }
     }
 
@@ -131,8 +132,6 @@ class PagesLoader {
             return 0;
         }
 
-        loadThumbnail(holder.page, documentPage);
-
         boolean isVertical = pdfView.isSwipeVertical();
         int max = isVertical ? colsRows.first : colsRows.second;
         int first = isVertical ? holder.col : holder.row; // first visible row/col
@@ -154,7 +153,6 @@ class PagesLoader {
         return loaded;
     }
 
-
     public int loadVisible() {
         int parts = 0;
         Holder firstHolder, lastHolder;
@@ -170,7 +168,18 @@ class PagesLoader {
         int stripesPerPage = MathUtils.ceil(pdfView.toCurrentScale(optimalPageSize) / stripeLength);
 
         for (int p = firstHolder.page; p <= lastHolder.page; p++) {
+
+            int documentPage = documentPage(p);
+            if (documentPage >= 0) {
+                loadThumbnail(p, documentPage);
+            }
+
+            if (previewOnly) {
+                continue;
+            }
+
             int first = 0;
+
             if (p == lastHolder.page) {
                 stripesPerPage = lastHolder.col + 1;
             }
@@ -189,12 +198,12 @@ class PagesLoader {
         }
 
         int prevDocPage = documentPage(firstHolder.page - 1);
-        if (prevDocPage >= 0) {
+        if (prevDocPage >= 0 && pdfView.getPageCount() > 1) {
             loadThumbnail(firstHolder.page - 1, prevDocPage);
         }
 
         int nextDocPage = documentPage(firstHolder.page + 1);
-        if (nextDocPage >= 0) {
+        if (nextDocPage >= 0 && pdfView.getPageCount() > 1) {
             loadThumbnail(firstHolder.page + 1, nextDocPage);
         }
         return parts;
@@ -225,7 +234,7 @@ class PagesLoader {
             if (!pdfView.cacheManager.upPartIfContained(userPage, documentPage, renderWidth, renderHeight, pageRelativeBounds, cacheOrder)) {
                 pdfView.renderingHandler.addRenderingTask(userPage, documentPage,
                         renderWidth, renderHeight, pageRelativeBounds, false, cacheOrder,
-                        pdfView.isBestQuality(), pdfView.isAnnotationRendering(), pdfView.getZoom());
+                        pdfView.isBestQuality(), pdfView.isAnnotationRendering());
             }
 
             cacheOrder++;
@@ -235,6 +244,7 @@ class PagesLoader {
     }
 
     public void loadPages() {
+        previewOnly = pdfView.getPreviewOnly();
         scaledHeight = pdfView.getPageOuterHeight();
         scaledWidth = pdfView.getPageOuterWidth();
         thumbnailWidth = (int) (pdfView.getOptimalPageWidth() * Constants.THUMBNAIL_RATIO);
@@ -250,7 +260,7 @@ class PagesLoader {
         partRenderHeight = Constants.PART_SIZE / pageRelativePartHeight;
         cacheOrder = 1;
         int loaded = loadVisible();
-        if (pdfView.getZoom() == 1) {
+        if (pdfView.getZoom() == 1 && pdfView.getPageCount() > 1 && !previewOnly) {
             if (pdfView.getScrollDir().equals(PDFView.ScrollDir.END)) { // if scrolling to end, preload next view
                 for (int i = 0; i < Constants.PRELOAD_COUNT && loaded < CACHE_SIZE; i++) {
                     loaded += loadRelative(i, loaded, true);
