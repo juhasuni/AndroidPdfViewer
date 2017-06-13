@@ -54,11 +54,9 @@ class RenderingHandler extends Handler {
     private Matrix renderMatrix = new Matrix();
     private final Set<Integer> openedPages = new HashSet<>();
     private boolean running = false;
-    private ArrayList<RenderingTask> tasks;
 
     RenderingHandler(Looper looper, PDFView pdfView, CacheManager cacheManager, PdfiumCore pdfiumCore, PdfDocument pdfDocument) {
         super(looper);
-        tasks = new ArrayList<>();
         this.pdfView = pdfView;
         this.cacheManager = cacheManager;
         this.pdfiumCore = pdfiumCore;
@@ -67,19 +65,11 @@ class RenderingHandler extends Handler {
 
     void addRenderingTask(int userPage, int page, float width, float height, RectF bounds, boolean thumbnail, int cacheOrder, boolean bestQuality, boolean annotationRendering) {
         RenderingTask task = new RenderingTask(width, height, bounds, userPage, page, thumbnail, cacheOrder, bestQuality, annotationRendering);
-
-        synchronized (tasks) {
-            if (tasks.contains(task)) {
-                return;
-            }
-        }
-
         Message msg = obtainMessage(MSG_RENDER_TASK, task);
         sendMessage(msg);
     }
 
     void cancel() {
-        tasks.clear();
         removeMessages(RenderingHandler.MSG_RENDER_TASK);
     }
 
@@ -87,10 +77,6 @@ class RenderingHandler extends Handler {
     public void handleMessage(Message message) {
         RenderingTask task = (RenderingTask) message.obj;
         final PagePart part = proceed(task);
-
-        synchronized (tasks) {
-            tasks.remove(task);
-        }
 
         if (part != null) {
             if (part.isThumbnail()) {
@@ -196,25 +182,6 @@ class RenderingHandler extends Handler {
             this.cacheOrder = cacheOrder;
             this.bestQuality = bestQuality;
             this.annotationRendering = annotationRendering;
-        }
-
-        public boolean equals(Object obj) {
-            if (!(obj instanceof RenderingTask)) {
-                return false;
-            }
-
-            RenderingTask task = (RenderingTask) obj;
-            return task.page == page
-                    && task.userPage == userPage
-                    && task.thumbnail == thumbnail
-                    && task.width == width
-                    && task.height == height
-                    && task.bounds.left == bounds.left
-                    && task.bounds.right == bounds.right
-                    && task.bounds.top == bounds.top
-                    && task.bounds.bottom == bounds.bottom
-                    && task.bestQuality == bestQuality
-                    && task.annotationRendering == annotationRendering;
         }
     }
 }
