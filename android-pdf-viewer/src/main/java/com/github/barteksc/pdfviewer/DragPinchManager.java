@@ -44,6 +44,7 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     private boolean scrolling = false;
     private boolean scaling = false;
+    private int currentPage = -1;
 
     public DragPinchManager(PDFView pdfView, AnimationManager animationManager) {
         this.pdfView = pdfView;
@@ -68,7 +69,7 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
     }
 
     private boolean isPageChange(float distance) {
-        return Math.abs(distance) > Math.abs(pdfView.toCurrentScale(swipeVertical ? pdfView.getOptimalPageHeight() : pdfView.getOptimalPageWidth()) / 2);
+        return Math.abs(distance) > Math.abs(swipeVertical ? pdfView.getPageOuterHeight() : pdfView.getPageOuterWidth() / 2);
     }
 
     public void setSwipeEnabled(boolean isSwipeEnabled) {
@@ -132,16 +133,23 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
     @Override
     public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
         scrolling = true;
+        if (currentPage < 0) {
+            currentPage = pdfView.getCurrentPage();
+        }
+
         if (isZooming() || isSwipeEnabled) {
             pdfView.moveRelativeTo(-distanceX, -distanceY);
         }
-        if (!scaling || pdfView.doRenderDuringScale()) {
+
+        if ((!scaling && isZooming()) || (scaling && pdfView.doRenderDuringScale())) {
           pdfView.loadPageByOffset();
         }
+        
         return true;
     }
 
     public void onScrollEnd(MotionEvent event) {
+        currentPage = -1;
         pdfView.loadPages();
         hideHandle();
     }
@@ -155,11 +163,44 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
     public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
         int xOffset = (int) pdfView.getCurrentXOffset();
         int yOffset = (int) pdfView.getCurrentYOffset();
-        animationManager.startFlingAnimation(xOffset,
-                yOffset, (int) (velocityX),
-                (int) (velocityY),
-                xOffset * (swipeVertical ? 2 : pdfView.getPageCount()), 0,
-                yOffset * (swipeVertical ? pdfView.getPageCount() : 2), 0);
+        float minX = xOffset * (swipeVertical ? 2 : pdfView.getPageCount()+1);
+        float minY = yOffset * (swipeVertical ? pdfView.getPageCount()+1 : 2);
+        float maxX = 0, maxY = 0;
+
+        if (pdfView.isPaging() && pdfView.getZoom() == 1 && currentPage >= 0) {
+            boolean forward = swipeVertical ? velocityY < 0 : velocityX < 0;
+            int page = Math.min(pdfView.getPageCount()-1, Math.max(0, forward ? currentPage+1 : currentPage-1));
+
+            if (swipeVertical) {
+                if (forward) {
+                    minY = pdfView.getPageOffsetY(page);
+                    maxY = 0;
+                } else {
+                    minY = 0;
+                    maxY = pdfView.getPageOffsetY(page);
+                }
+
+            } else {
+                if (forward) {
+                    minX = pdfView.getPageOffsetX(page);
+                    maxX = 0;
+                } else {
+                    minY = 0;
+                    maxX = pdfView.getPageOffsetX(page);
+                }
+
+            }
+        }
+
+        animationManager.startFlingAnimation(
+                xOffset,
+                yOffset,
+                (int) velocityX,
+                (int) velocityY,
+                (int) minX,
+                (int) maxX,
+                (int) minY,
+                (int) maxY);
 
         return true;
     }
