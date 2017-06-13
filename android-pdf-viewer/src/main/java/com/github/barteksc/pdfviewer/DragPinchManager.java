@@ -32,16 +32,15 @@ import static com.github.barteksc.pdfviewer.util.Constants.Pinch.MINIMUM_ZOOM;
  */
 class DragPinchManager implements GestureDetector.OnGestureListener, GestureDetector.OnDoubleTapListener, ScaleGestureDetector.OnScaleGestureListener, View.OnTouchListener {
 
+    static float MIN_FLING_PAGING_VELOCITY = 4000;
+
     private PDFView pdfView;
     private AnimationManager animationManager;
-
     private GestureDetector gestureDetector;
     private ScaleGestureDetector scaleGestureDetector;
 
     private boolean isSwipeEnabled;
-
     private boolean swipeVertical;
-
     private boolean scrolling = false;
     private boolean scaling = false;
     private int currentPage = -1;
@@ -167,28 +166,17 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
         float minY = yOffset * (swipeVertical ? pdfView.getPageCount()+1 : 2);
         float maxX = 0, maxY = 0;
 
-        if (pdfView.isPaging() && pdfView.getZoom() == 1 && currentPage >= 0) {
-            boolean forward = swipeVertical ? velocityY < 0 : velocityX < 0;
-            int page = Math.min(pdfView.getPageCount()-1, Math.max(0, forward ? currentPage+1 : currentPage-1));
+        if (pdfView.isPaging() && !pdfView.isZooming()) {
+            float velocity = swipeVertical ? velocityY : velocityX;
+            boolean forward = velocity < 0;
 
-            if (swipeVertical) {
-                if (forward) {
-                    minY = pdfView.getPageOffsetY(page);
-                    maxY = 0;
-                } else {
-                    minY = 0;
-                    maxY = pdfView.getPageOffsetY(page);
+            if (Math.abs(velocity) > MIN_FLING_PAGING_VELOCITY) {
+                int page = Math.min(pdfView.getPageCount()-1, Math.max(0, forward ? currentPage+1 : currentPage-1));
+
+                if (page != currentPage) {
+                    pdfView.jumpTo(page, true);
+                    return true;
                 }
-
-            } else {
-                if (forward) {
-                    minX = pdfView.getPageOffsetX(page);
-                    maxX = 0;
-                } else {
-                    minY = 0;
-                    maxX = pdfView.getPageOffsetX(page);
-                }
-
             }
         }
 
