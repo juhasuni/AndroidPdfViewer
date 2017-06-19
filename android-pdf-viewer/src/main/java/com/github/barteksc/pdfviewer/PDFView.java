@@ -380,9 +380,9 @@ public class PDFView extends RelativeLayout {
         this.onLoadCompleteListener = onLoadCompleteListener;
         this.onErrorListener = onErrorListener;
 
-        int firstPageIdx = 0;
+        int firstPageIdx = this.defaultPage;
         if (originalUserPages != null) {
-            firstPageIdx = originalUserPages[0];
+            firstPageIdx = originalUserPages[this.defaultPage];
         }
 
         recycled = false;
@@ -452,7 +452,7 @@ public class PDFView extends RelativeLayout {
         if (recycled) {
             return;
         }
-
+        
         // Check the page number and makes the
         // difference between UserPages and DocumentPages
         pageNb = determineValidPageNumberFrom(pageNb);
@@ -1018,9 +1018,11 @@ public class PDFView extends RelativeLayout {
             if (getPageCount() * toCurrentScale(optimalPageHeight) < getHeight()) { // whole document height visible on screen
                 offsetY = (getHeight() - getPageCount() * toCurrentScale(optimalPageHeight)) / 2;
             } else if (isPaging() && isZooming()) { // limit to current page bounds when zooming and paging
+                float minY = (-(currentPage+1) * getPageOuterHeight() + getHeight());
+                float maxY = -currentPage * getPageOuterHeight();
                 offsetY = Math.max(
-                        (-(currentPage+1) * toCurrentScale(optimalPageHeight) + getHeight()),
-                        Math.min(-currentPage * toCurrentScale(optimalPageHeight), offsetY));
+                        maxY,
+                        Math.min(minY, offsetY));
             } else {
                 if (offsetY > 0) { // top visible
                     offsetY = 0;
@@ -1051,10 +1053,12 @@ public class PDFView extends RelativeLayout {
             // Check X offset
             if (getPageCount() * toCurrentScale(optimalPageWidth) < getWidth()) { // whole document width visible on screen
                 offsetX = (getWidth() - getPageCount() * toCurrentScale(optimalPageWidth)) / 2;
-            } else if (isPaging() && isZooming()) { // limit to current page bounds when zooming and paging
+            } else if (isPaging() && isZooming()) { // restrict to current page bounds when zooming and paging
+                float minX = (-(currentPage+1) * getPageOuterWidth() + getWidth());
+                float maxX = -currentPage * getPageOuterWidth();
                 offsetX = Math.max(
-                        (-(currentPage+1) * toCurrentScale(optimalPageWidth) + getWidth()),
-                        Math.min(-currentPage * toCurrentScale(optimalPageWidth), offsetX));
+                        minX,
+                        Math.min(maxX, offsetX));
             } else {
                 if (offsetX > 0) { // left visible
                     offsetX = 0;
