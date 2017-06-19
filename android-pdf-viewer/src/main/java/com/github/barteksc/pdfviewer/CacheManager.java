@@ -123,6 +123,12 @@ class CacheManager {
         return passiveCache.size() + activeCache.size();
     }
 
+    private int thumbCacheSize() {
+        synchronized (thumbnails) {
+            return thumbnails.size();
+        }
+    }
+
     private int free(int cacheType, int size) {
         PagePartCache cache = cacheType == PASSIVE_CACHE ? passiveCache : activeCache;
         return cache.free(size);
@@ -130,8 +136,8 @@ class CacheManager {
 
     private boolean recycleThumbnail() {
         synchronized (thumbnails) {
-            if (this.thumbnails.size() > 0) {
-                this.thumbnails.remove(0).getRenderedBitmap().recycle();
+            if (thumbnails.size() > 0) {
+                thumbnails.remove(0).getRenderedBitmap().recycle();
                 return true;
             } else {
                 return false;
@@ -140,11 +146,12 @@ class CacheManager {
     }
 
     public void cacheThumbnail(PagePart part) {
-        synchronized (thumbnails) {
+
+        synchronized (CacheManager.managers) {
             int totalSize = 0;
             for (WeakReference<CacheManager> ref : CacheManager.managers) {
                 if (ref.get() != null) {
-                    totalSize += ref.get().thumbnails.size();
+                    totalSize += ref.get().thumbCacheSize();
                 }
             }
 
@@ -160,11 +167,13 @@ class CacheManager {
                     }
                 }
 
-                if (!freed && this.thumbnails.size() > 0) {
+                if (!freed && this.thumbCacheSize() > 0) {
                     this.recycleThumbnail();
                 }
             }
+        }
 
+        synchronized (thumbnails) {
             // Then add thumbnail
             thumbnails.add(part);
         }
@@ -226,7 +235,6 @@ class CacheManager {
             thumbnails.clear();
         }
     }
-
 
     class PagePartCache extends PriorityBlockingQueue<PagePart> {
         PagePartCache(int cacheSize) {
