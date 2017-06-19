@@ -64,7 +64,15 @@ class PDFViewDocumentLoader {
         CacheRecord record = cache.release(docSource);
 
         if (record != null && record.isReleased()) {
-            pdfiumCore.closeDocument(record.pdfDocument);
+            final PdfiumCore core = pdfiumCore;
+            final PdfDocument doc = record.pdfDocument;
+
+            AsyncTask.execute(new Runnable() {
+                @Override
+                public void run() {
+                    core.closeDocument(doc);
+                }
+            });
         }
     }
 
