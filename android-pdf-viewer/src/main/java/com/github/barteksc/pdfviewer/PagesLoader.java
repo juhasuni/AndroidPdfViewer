@@ -92,10 +92,11 @@ class PagesLoader {
         return holder;
     }
 
-    private void loadThumbnail(int userPage, int documentPage) {
+    private void loadThumbnail(int userPage, int documentPage, boolean usingPrimaryHandler) {
         if (!pdfView.cacheManager.containsThumbnail(userPage, documentPage,
                 thumbnailWidth, thumbnailHeight, thumbnailRect)) {
-            pdfView.thumbnailRenderingHandler.addRenderingTask(userPage, documentPage,
+            RenderingHandler handler = usingPrimaryHandler ? pdfView.primaryRenderingHandler : pdfView.secondaryRenderingHandler;
+            handler.addRenderingTask(userPage, documentPage,
                     thumbnailWidth, thumbnailHeight, thumbnailRect,
                     true, 0, pdfView.isBestQuality(), pdfView.isAnnotationRendering());
         }
@@ -154,6 +155,7 @@ class PagesLoader {
 
     public int loadVisible() {
         int parts = 0;
+        int loadedThumbs = 0;
         Holder firstHolder, lastHolder;
         boolean isVertical = pdfView.isSwipeVertical();
         float offset = isVertical ? yOffset : xOffset;
@@ -170,7 +172,8 @@ class PagesLoader {
 
             int documentPage = documentPage(p);
             if (documentPage >= 0) {
-                loadThumbnail(p, documentPage);
+                loadThumbnail(p, documentPage, true);
+                loadedThumbs++;
             }
 
             if (previewOnly) {
@@ -196,15 +199,33 @@ class PagesLoader {
             }
         }
 
-        int prevDocPage = documentPage(firstHolder.page - 1);
-        if (prevDocPage >= 0 && pdfView.getPageCount() > 1) {
-            loadThumbnail(firstHolder.page - 1, prevDocPage);
+        int deltaMax = Math.max(
+                pdfView.getPageCount() - lastHolder.page,
+                firstHolder.page-1);
+
+        for (int d = 1; d <= deltaMax; d++) {
+            int prev = firstHolder.page - d;
+            int next = lastHolder.page + d;
+
+            if (loadedThumbs >= Constants.Cache.THUMBNAILS_CACHE_SIZE) {
+                break;
+            }
+
+            if (prev >= 0) {
+                loadThumbnail(prev, documentPage(prev), false);
+                loadedThumbs++;
+            }
+
+            if (loadedThumbs >= Constants.Cache.THUMBNAILS_CACHE_SIZE) {
+                break;
+            }
+
+            if (next < pdfView.getPageCount()) {
+                loadThumbnail(next, documentPage(next), false);
+                loadedThumbs++;
+            }
         }
 
-        int nextDocPage = documentPage(firstHolder.page + 1);
-        if (nextDocPage >= 0 && pdfView.getPageCount() > 1) {
-            loadThumbnail(firstHolder.page + 1, nextDocPage);
-        }
         return parts;
     }
 
@@ -231,7 +252,7 @@ class PagesLoader {
 
         if (renderWidth > 0 && renderHeight > 0) {
             if (!pdfView.cacheManager.upPartIfContained(userPage, documentPage, renderWidth, renderHeight, pageRelativeBounds, cacheOrder)) {
-                pdfView.detailsRenderingHandler.addRenderingTask(userPage, documentPage,
+                pdfView.primaryRenderingHandler.addRenderingTask(userPage, documentPage,
                         renderWidth, renderHeight, pageRelativeBounds, false, cacheOrder,
                         pdfView.isBestQuality(), pdfView.isAnnotationRendering());
             }
