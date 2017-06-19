@@ -47,7 +47,6 @@ class RenderingHandler extends Handler {
     private PDFView pdfView;
     private PdfiumCore pdfiumCore;
     private PdfDocument pdfDocument;
-    private CacheManager cacheManager;
 
     private RectF renderBounds = new RectF();
     private Rect roundedRenderBounds = new Rect();
@@ -55,10 +54,9 @@ class RenderingHandler extends Handler {
     private final Set<Integer> openedPages = new HashSet<>();
     private boolean running = false;
 
-    RenderingHandler(Looper looper, PDFView pdfView, CacheManager cacheManager, PdfiumCore pdfiumCore, PdfDocument pdfDocument) {
+    RenderingHandler(Looper looper, PDFView pdfView, PdfiumCore pdfiumCore, PdfDocument pdfDocument) {
         super(looper);
         this.pdfView = pdfView;
-        this.cacheManager = cacheManager;
         this.pdfiumCore = pdfiumCore;
         this.pdfDocument = pdfDocument;
     }
@@ -79,12 +77,6 @@ class RenderingHandler extends Handler {
         final PagePart part = proceed(task);
 
         if (part != null) {
-            if (part.isThumbnail()) {
-                cacheManager.cacheThumbnail(part);
-            } else {
-                cacheManager.cachePart(part);
-            }
-
             if (running) {
                 pdfView.post(new Runnable() {
                     @Override
@@ -118,7 +110,6 @@ class RenderingHandler extends Handler {
             return null;
         }
         calculateBounds(w, h, renderingTask.bounds);
-        Log.d("RenderingHandler", "Render "+ (renderingTask.thumbnail ? "thumb" : "part") +" on page " + renderingTask.page);
 
         pdfiumCore.renderPageBitmap(pdfDocument, render, renderingTask.page,
                 roundedRenderBounds.left, roundedRenderBounds.top,
