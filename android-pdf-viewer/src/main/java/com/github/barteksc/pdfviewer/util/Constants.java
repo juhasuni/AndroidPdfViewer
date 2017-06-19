@@ -41,11 +41,16 @@ public class Constants {
     }
 
     public static class Pinch {
-
         public static float MAXIMUM_ZOOM = 10;
 
         public static float MINIMUM_ZOOM = 1;
-
     }
 
+    public static class Fling {
+        /** Minimum velocity for changing page on fling gesture */
+        public static float MIN_PAGING_VELOCITY = 4000;
+
+        /** Minimum distance for changing page on fling gesture */
+        public static float MIN_PAGING_DISTANCE = 100;
+    }
 }
