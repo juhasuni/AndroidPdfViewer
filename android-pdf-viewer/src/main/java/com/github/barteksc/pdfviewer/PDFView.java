@@ -204,24 +204,24 @@ public class PDFView extends RelativeLayout {
     private State state = State.DEFAULT;
 
     /**
-     * The thread {@link #detailsRenderingHandler} will run on
+     * The thread {@link #primaryRenderingHandler} will run on
      */
-    private HandlerThread detailsRenderingThread;
+    private HandlerThread primaryRenderingThread;
 
     /**
     * Handler always waiting in the background and rendering tasks
     */
-    RenderingHandler detailsRenderingHandler;
+    RenderingHandler primaryRenderingHandler;
 
     /**
-     * The thread {@link #thumbnailRenderingHandler} will run on
+     * The thread {@link #secondaryRenderingHandler} will run on
      */
-    private HandlerThread thumbnailRenderingThread;
+    private HandlerThread secondaryRenderingThread;
 
     /**
      * Handler always waiting in the background and rendering tasks
      */
-    RenderingHandler thumbnailRenderingHandler;
+    RenderingHandler secondaryRenderingHandler;
 
     private PagesLoader pagesLoader;
 
@@ -385,8 +385,6 @@ public class PDFView extends RelativeLayout {
             firstPageIdx = originalUserPages[0];
         }
 
-        Log.d("PDFView", "loaded page " + firstPageIdx);
-
         recycled = false;
 
         // Start decoding document
@@ -531,6 +529,18 @@ public class PDFView extends RelativeLayout {
         this.dragPinchManager.enableDoubletap(enableDoubletap);
     }
 
+    public void enableFling(boolean enableFling) {
+        dragPinchManager.setFlingEnabled(enableFling);
+    }
+
+    public void enableZoom(boolean enableZoom) {
+        dragPinchManager.setZoomEnabled(enableZoom);
+    }
+
+    public void enableGestures(boolean enableGestures) {
+        dragPinchManager.setEnabled(enableGestures);
+    }
+
     private void setOnPageChangeListener(OnPageChangeListener onPageChangeListener) {
         this.onPageChangeListener = onPageChangeListener;
     }
@@ -572,30 +582,29 @@ public class PDFView extends RelativeLayout {
     }
 
     public void recycle() {
-
         animationManager.stopAll();
 
         // Stop tasks
-        if (detailsRenderingHandler != null) {
-            detailsRenderingHandler.cancel();
-            detailsRenderingHandler.stop();
+        if (primaryRenderingThread != null) {
+            primaryRenderingThread.quit();
         }
 
-        if (thumbnailRenderingHandler != null) {
-            thumbnailRenderingHandler.cancel();
-            thumbnailRenderingHandler.stop();
+        if (secondaryRenderingThread != null) {
+            secondaryRenderingThread.quit();
+        }
+
+        if (primaryRenderingHandler != null) {
+            primaryRenderingHandler.cancel();
+            primaryRenderingHandler.stop();
+        }
+
+        if (secondaryRenderingHandler != null) {
+            secondaryRenderingHandler.cancel();
+            secondaryRenderingHandler.stop();
         }
 
         if (decodingTask != null) {
             decodingTask.requestCancel();
-        }
-
-        if (detailsRenderingThread != null) {
-            detailsRenderingThread.quit();
-        }
-
-        if (thumbnailRenderingThread != null) {
-            thumbnailRenderingThread.quit();
         }
 
         // Clear caches
@@ -609,9 +618,9 @@ public class PDFView extends RelativeLayout {
             documentLoader.unload(documentSource, pdfiumCore);
         }
 
-        detailsRenderingThread = null;
+        primaryRenderingThread = null;
         documentSource = null;
-        detailsRenderingHandler = null;
+        primaryRenderingHandler = null;
         originalUserPages = null;
         filteredUserPages = null;
         filteredUserPageIndexes = null;
@@ -630,14 +639,13 @@ public class PDFView extends RelativeLayout {
 
     @Override
     protected void onDetachedFromWindow() {
-        Log.d("PDFView", "detached from window " + this.originalUserPages[0]);
         recycle();
         super.onDetachedFromWindow();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-        if (isInEditMode()) {
+        if (isInEditMode() || state != State.LOADED) {
             return;
         }
         animationManager.stopAll();
@@ -804,12 +812,12 @@ public class PDFView extends RelativeLayout {
      * the current page displayed
      */
     public void loadPages() {
-        if (optimalPageWidth == 0 || optimalPageHeight == 0 || detailsRenderingHandler == null) {
+        if (optimalPageWidth == 0 || optimalPageHeight == 0 || primaryRenderingHandler == null) {
             return;
         }
 
         // Cancel all current tasks
-        detailsRenderingHandler.cancel();
+        primaryRenderingHandler.cancel();
         cacheManager.makeANewSet();
 
         pagesLoader.loadPages();
@@ -831,11 +839,12 @@ public class PDFView extends RelativeLayout {
 
         pagesLoader = new PagesLoader(this);
 
-        detailsRenderingThread = new HandlerThread("PDF render details");
-        detailsRenderingHandler = initRenderingHandler(detailsRenderingThread);
+        primaryRenderingThread = new HandlerThread("PDF primary rendering");
+        primaryRenderingThread.setPriority(Thread.MAX_PRIORITY);
+        primaryRenderingHandler = initRenderingHandler(primaryRenderingThread);
 
-        thumbnailRenderingThread = new HandlerThread("PDF render thumbnails");
-        thumbnailRenderingHandler = initRenderingHandler(thumbnailRenderingThread);
+        secondaryRenderingThread = new HandlerThread("PDF secondary rendering");
+        secondaryRenderingHandler = initRenderingHandler(secondaryRenderingThread);
 
         if (scrollHandle != null) {
             scrollHandle.setupLayout(this);
@@ -859,15 +868,15 @@ public class PDFView extends RelativeLayout {
             renderingThread.start();
         }
 
-        if (detailsRenderingHandler != null) {
-            detailsRenderingHandler.cancel();
-            detailsRenderingHandler.stop();
+        if (primaryRenderingHandler != null) {
+            primaryRenderingHandler.cancel();
+            primaryRenderingHandler.stop();
         }
 
-        detailsRenderingHandler = new RenderingHandler(renderingThread.getLooper(),
-                this, cacheManager, pdfiumCore, pdfDocument);
-        detailsRenderingHandler.start();
-        return detailsRenderingHandler;
+        primaryRenderingHandler = new RenderingHandler(renderingThread.getLooper(),
+                this, pdfiumCore, pdfDocument);
+        primaryRenderingHandler.start();
+        return primaryRenderingHandler;
     }
 
     void loadError(Throwable t) {
@@ -897,6 +906,12 @@ public class PDFView extends RelativeLayout {
         if (state == State.LOADED) {
             state = State.SHOWN;
             triggerInitialRender = true;
+        }
+
+        if (part.isThumbnail()) {
+            cacheManager.cacheThumbnail(part);
+        } else {
+            cacheManager.cachePart(part);
         }
 
         redraw();
@@ -1057,8 +1072,8 @@ public class PDFView extends RelativeLayout {
             }
         }
 
-        pageMarginHorizontal = enablePaging ? toCurrentScale(getWidth() - optimalPageWidth) / 2 : 0;
-        pageMarginVertical = enablePaging ? toCurrentScale(getHeight() - optimalPageHeight) / 2 : 0;
+        pageMarginHorizontal = (isPaging() && getPageCount() > 1) ? toCurrentScale(getWidth() - optimalPageWidth) / 2 : 0;
+        pageMarginVertical = (isPaging() && getPageCount() > 1) ? toCurrentScale(getHeight() - optimalPageHeight) / 2 : 0;
 
         currentXOffset = offsetX;
         currentYOffset = offsetY;
@@ -1425,18 +1440,12 @@ public class PDFView extends RelativeLayout {
 
         this.previewOnly = previewOnly;
 
-        if (filteredUserPages != null) {
-            Log.d("PDFView", "set previewOnly "+(previewOnly ? "true" : "false")+" for page " + filteredUserPages[0]);
+        if (primaryRenderingThread != null) {
+            primaryRenderingThread.setPriority(previewOnly ? Thread.NORM_PRIORITY : Thread.MAX_PRIORITY);
         }
 
-
-        if (detailsRenderingThread != null) {
-            detailsRenderingThread.setPriority(previewOnly ? Thread.NORM_PRIORITY : Thread.MAX_PRIORITY);
-        }
-
-        if (previewOnly && detailsRenderingHandler != null) {
-            Log.d("PDFView", "cancel render page " + filteredUserPages[0]);
-            detailsRenderingHandler.cancel();
+        if (previewOnly && primaryRenderingHandler != null) {
+            primaryRenderingHandler.cancel();
         }
 
         if (!previewOnly) {
@@ -1526,6 +1535,10 @@ public class PDFView extends RelativeLayout {
 
         private boolean enableDoubletap = true;
 
+        private boolean enableFling = true;
+
+        private boolean enableZoom = true;
+
         private OnDrawListener onDrawListener;
 
         private OnLoadCompleteListener onLoadCompleteListener;
@@ -1574,6 +1587,16 @@ public class PDFView extends RelativeLayout {
 
         public Configurator enableDoubletap(boolean enableDoubletap) {
             this.enableDoubletap = enableDoubletap;
+            return this;
+        }
+
+        public Configurator enableFling(boolean enableFling) {
+            this.enableFling = enableFling;
+            return this;
+        }
+
+        public Configurator enableZoom(boolean enableZoom) {
+            this.enableZoom = enableZoom;
             return this;
         }
 
@@ -1662,6 +1685,8 @@ public class PDFView extends RelativeLayout {
             PDFView.this.setOnAnnotationLinkTapListener(onAnnotationLinkTapListener);
             PDFView.this.enableSwipe(enableSwipe);
             PDFView.this.enableDoubletap(enableDoubletap);
+            PDFView.this.enableFling(enableFling);
+            PDFView.this.enableZoom(enableZoom);
             PDFView.this.setDefaultPage(defaultPage);
             PDFView.this.setSwipeVertical(!swipeHorizontal);
             PDFView.this.enableAnnotationRendering(annotationRendering);
