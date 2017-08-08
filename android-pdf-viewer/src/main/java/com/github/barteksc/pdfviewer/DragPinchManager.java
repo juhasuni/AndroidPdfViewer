@@ -42,7 +42,6 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     private boolean enabled;
     private boolean isSwipeEnabled;
-    private boolean isFlingEnabled;
     private boolean isZoomEnabled;
     private boolean swipeVertical;
     private boolean scrolling = false;
@@ -54,7 +53,6 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
         this.pdfView = pdfView;
         this.animationManager = animationManager;
         this.isSwipeEnabled = false;
-        this.isFlingEnabled = true;
         this.swipeVertical = pdfView.isSwipeVertical();
         gestureDetector = new GestureDetector(pdfView.getContext(), this);
         scaleGestureDetector = new ScaleGestureDetector(pdfView.getContext(), this);
@@ -83,10 +81,6 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     public void setSwipeEnabled(boolean isSwipeEnabled) {
         this.isSwipeEnabled = isSwipeEnabled;
-    }
-
-    public void setFlingEnabled(boolean isFlingEnabled) {
-        this.isFlingEnabled = isFlingEnabled;
     }
 
     public void setZoomEnabled(boolean isZoomEnabled) {
@@ -194,11 +188,11 @@ class DragPinchManager implements GestureDetector.OnGestureListener, GestureDete
 
     @Override
     public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-        if (!isFlingEnabled || !enabled) {
+        if (!enabled) {
             return false;
         }
 
-        if (pdfView.isPaging() && !pdfView.isZooming()) {
+        if (pdfView.isPaging() && !pdfView.isZooming() && isSwipeEnabled) {
             float velocity = swipeVertical ? velocityY : velocityX;
             float positionStart = swipeVertical ? e1.getY() : e1.getX();
             float positionEnd = swipeVertical ? e2.getY() : e2.getX();
