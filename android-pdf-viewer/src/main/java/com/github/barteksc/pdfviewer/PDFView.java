@@ -529,10 +529,6 @@ public class PDFView extends RelativeLayout {
         this.dragPinchManager.enableDoubletap(enableDoubletap);
     }
 
-    public void enableFling(boolean enableFling) {
-        dragPinchManager.setFlingEnabled(enableFling);
-    }
-
     public void enableZoom(boolean enableZoom) {
         dragPinchManager.setZoomEnabled(enableZoom);
     }
@@ -1003,6 +999,8 @@ public class PDFView extends RelativeLayout {
      */
     public void moveTo(float offsetX, float offsetY, boolean moveHandle) {
         if (swipeVertical) {
+            pageMarginVertical = (isPaging() && getPageCount() > 1) ? toCurrentScale(getHeight() - optimalPageHeight) / 2 : 0;
+
             // Check X offset
             if (toCurrentScale(optimalPageWidth) < getWidth()) {
                 offsetX = getWidth() / 2 - toCurrentScale(optimalPageWidth) / 2;
@@ -1026,8 +1024,8 @@ public class PDFView extends RelativeLayout {
             } else {
                 if (offsetY > 0) { // top visible
                     offsetY = 0;
-                } else if (offsetY + toCurrentScale(getPageCount() * optimalPageHeight) < getHeight()) { // bottom visible
-                    offsetY = -toCurrentScale(getPageCount() * optimalPageHeight) + getHeight();
+                } else if (offsetY + getPageCount() * getPageOuterHeight() < getHeight()) { // bottom visible
+                    offsetY = -getPageCount() * getPageOuterHeight() + getHeight();
                 }
             }
 
@@ -1039,6 +1037,8 @@ public class PDFView extends RelativeLayout {
                 scrollDir = ScrollDir.NONE;
             }
         } else {
+            pageMarginHorizontal = (isPaging() && getPageCount() > 1) ? toCurrentScale(getWidth() - optimalPageWidth) / 2 : 0;
+
             // Check Y offset
             if (toCurrentScale(optimalPageHeight) < getHeight()) {
                 offsetY = getHeight() / 2 - toCurrentScale(optimalPageHeight) / 2;
@@ -1062,8 +1062,8 @@ public class PDFView extends RelativeLayout {
             } else {
                 if (offsetX > 0) { // left visible
                     offsetX = 0;
-                } else if (offsetX + toCurrentScale(getPageCount() * optimalPageWidth) < getWidth()) { // right visible
-                    offsetX = -toCurrentScale(getPageCount() * optimalPageWidth) + getWidth();
+                } else if (offsetX + (getPageCount() * getPageOuterWidth()) < getWidth()) { // right visible
+                    offsetX = -getPageCount() * getPageOuterWidth() + getWidth();
                 }
             }
 
@@ -1075,9 +1075,6 @@ public class PDFView extends RelativeLayout {
                 scrollDir = ScrollDir.NONE;
             }
         }
-
-        pageMarginHorizontal = (isPaging() && getPageCount() > 1) ? toCurrentScale(getWidth() - optimalPageWidth) / 2 : 0;
-        pageMarginVertical = (isPaging() && getPageCount() > 1) ? toCurrentScale(getHeight() - optimalPageHeight) / 2 : 0;
 
         currentXOffset = offsetX;
         currentYOffset = offsetY;
@@ -1539,8 +1536,6 @@ public class PDFView extends RelativeLayout {
 
         private boolean enableDoubletap = true;
 
-        private boolean enableFling = true;
-
         private boolean enableZoom = true;
 
         private OnDrawListener onDrawListener;
@@ -1591,11 +1586,6 @@ public class PDFView extends RelativeLayout {
 
         public Configurator enableDoubletap(boolean enableDoubletap) {
             this.enableDoubletap = enableDoubletap;
-            return this;
-        }
-
-        public Configurator enableFling(boolean enableFling) {
-            this.enableFling = enableFling;
             return this;
         }
 
@@ -1689,7 +1679,6 @@ public class PDFView extends RelativeLayout {
             PDFView.this.setOnAnnotationLinkTapListener(onAnnotationLinkTapListener);
             PDFView.this.enableSwipe(enableSwipe);
             PDFView.this.enableDoubletap(enableDoubletap);
-            PDFView.this.enableFling(enableFling);
             PDFView.this.enableZoom(enableZoom);
             PDFView.this.setDefaultPage(defaultPage);
             PDFView.this.setSwipeVertical(!swipeHorizontal);
